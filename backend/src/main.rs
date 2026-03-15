@@ -300,14 +300,42 @@ fn parse_token_created(logs: &RpcLogsResponse, _program_id: Pubkey) -> Option<To
 }
 
 fn to_fixed_6(txt: &str) -> Result<u64> {
-    // TODO(student): parse a decimal string into an integer with 6 fixed decimals.
-    // Examples:
-    // - "120" -> 120_000_000
-    // - "120.12" -> 120_120_000
-    // - "0.000001" -> 1
-    // Extra digits after the 6th decimal place should be truncated, not rounded.
-    let _ = txt;
-    todo!("student task: implement fixed-6 parser")
+    let txt = txt.trim();
+    if txt.is_empty() {
+        return Err(anyhow!("price string is empty"));
+    }
+
+    let mut parts = txt.split('.');
+    let whole = parts.next().ok_or_else(|| anyhow!("missing integer part"))?;
+    let frac = parts.next();
+    if parts.next().is_some() {
+        return Err(anyhow!("invalid decimal format"));
+    }
+    if whole.is_empty() || !whole.chars().all(|c| c.is_ascii_digit()) {
+        return Err(anyhow!("invalid integer part"));
+    }
+
+    let whole_num = whole.parse::<u64>().context("invalid integer part")?;
+    let whole_scaled = whole_num
+        .checked_mul(1_000_000)
+        .ok_or_else(|| anyhow!("price overflow"))?;
+
+    let frac_scaled = match frac {
+        Some(frac) => {
+            if frac.is_empty() || !frac.chars().all(|c| c.is_ascii_digit()) {
+                return Err(anyhow!("invalid fractional part"));
+            }
+
+            let truncated: String = frac.chars().take(6).collect();
+            let padded = format!("{truncated:0<6}");
+            padded.parse::<u64>().context("invalid fractional part")?
+        }
+        None => 0,
+    };
+
+    whole_scaled
+        .checked_add(frac_scaled)
+        .ok_or_else(|| anyhow!("price overflow"))
 }
 
 #[cfg(test)]
@@ -338,9 +366,7 @@ mod tests {
 
     #[test]
     fn to_fixed_6_truncates_fraction_to_six_digits() {
-        // TODO(student): this assertion is intentionally wrong.
-        // The parser is expected to truncate after 6 digits instead of rounding.
-        assert_eq!(to_fixed_6("1.1234569").unwrap(), 1_123_457);
+        assert_eq!(to_fixed_6("1.1234569").unwrap(), 1_123_456);
     }
 
     #[test]
