@@ -1,7 +1,8 @@
 use std::{env, str::FromStr, sync::Arc, time::Duration};
 
-use anchor_lang::{InstructionData, ToAccountMetas};
+use anchor_lang::{AnchorDeserialize, Discriminator, InstructionData, ToAccountMetas};
 use anyhow::{anyhow, Context, Result};
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use dotenvy::dotenv;
 use futures::StreamExt;
 use regex::Regex;
@@ -18,6 +19,7 @@ use solana_sdk::{
     signature::{read_keypair_file, Keypair, Signature, Signer},
     transaction::Transaction,
 };
+use token_minter::TokenCreated;
 use tokio::time::interval;
 use tracing::{error, info, warn};
 
@@ -53,7 +55,8 @@ impl Config {
             env::var("BACKEND_KEYPAIR_PATH").context("BACKEND_KEYPAIR_PATH is required")?;
         if backend_keypair_path.starts_with("~/") {
             if let Some(home) = env::var_os("HOME") {
-                backend_keypair_path = format!("{}/{}", home.to_string_lossy(), &backend_keypair_path[2..]);
+                backend_keypair_path =
+                    format!("{}/{}", home.to_string_lossy(), &backend_keypair_path[2..]);
             }
         }
         let poll = env::var("PRICE_POLL_INTERVAL_SEC")
@@ -149,7 +152,11 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn run_price_updater(cfg: Config, price_source: PriceSource, admin: Arc<Keypair>) -> Result<()> {
+async fn run_price_updater(
+    cfg: Config,
+    price_source: PriceSource,
+    admin: Arc<Keypair>,
+) -> Result<()> {
     let client = RpcClient::new(cfg.rpc_http.clone());
     let mut ticker = interval(cfg.price_poll_interval);
 
@@ -172,7 +179,10 @@ async fn try_update_price(
     match price_source.fetch_price().await {
         Ok(price) => {
             if price == 0 {
-                warn!("Skipped {} price update because fetched price is zero", kind);
+                warn!(
+                    "Skipped {} price update because fetched price is zero",
+                    kind
+                );
                 return;
             }
             match submit_price(client, cfg, price, admin).await {
@@ -210,12 +220,8 @@ async fn submit_price(
         .await
         .context("fetch blockhash")?;
 
-    let tx = Transaction::new_signed_with_payer(
-        &[ix],
-        Some(&admin.pubkey()),
-        &[admin.as_ref()],
-        bh,
-    );
+    let tx =
+        Transaction::new_signed_with_payer(&[ix], Some(&admin.pubkey()), &[admin.as_ref()], bh);
 
     let sig = client
         .send_and_confirm_transaction_with_spinner_and_commitment(
@@ -266,6 +272,10 @@ async fn run_event_listener(cfg: Config) -> Result<()> {
 }
 
 fn parse_token_created(logs: &RpcLogsResponse, _program_id: Pubkey) -> Option<TokenCreatedLog> {
+    if let Some(event) = parse_anchor_token_created_event(logs) {
+        return Some(event);
+    }
+
     let re = Regex::new(
         r"TokenCreated \{ creator: ([A-Za-z0-9]+), mint: ([A-Za-z0-9]+), decimals: (\d+), initial_supply: (\d+), fee_lamports: (\d+), sol_usd_price: (\d+), slot: (\d+) \}",
     )
@@ -299,6 +309,38 @@ fn parse_token_created(logs: &RpcLogsResponse, _program_id: Pubkey) -> Option<To
     None
 }
 
+fn parse_anchor_token_created_event(logs: &RpcLogsResponse) -> Option<TokenCreatedLog> {
+    const PROGRAM_DATA_PREFIX: &str = "Program data: ";
+
+    for log in &logs.logs {
+        let encoded = match log.strip_prefix(PROGRAM_DATA_PREFIX) {
+            Some(value) => value,
+            None => continue,
+        };
+        let raw = BASE64_STANDARD.decode(encoded).ok()?;
+        if raw.len() < TokenCreated::DISCRIMINATOR.len() {
+            continue;
+        }
+        if !raw.starts_with(TokenCreated::DISCRIMINATOR) {
+            continue;
+        }
+
+        let event = TokenCreated::try_from_slice(&raw[TokenCreated::DISCRIMINATOR.len()..]).ok()?;
+        return Some(TokenCreatedLog {
+            creator: event.creator.to_string(),
+            mint: event.mint.to_string(),
+            decimals: event.decimals,
+            initial_supply: event.initial_supply,
+            fee_lamports: event.fee_lamports,
+            sol_usd_price: event.sol_usd_price,
+            slot: event.slot,
+            signature: logs.signature.clone(),
+        });
+    }
+
+    None
+}
+
 fn to_fixed_6(txt: &str) -> Result<u64> {
     let txt = txt.trim();
     if txt.is_empty() {
@@ -306,7 +348,9 @@ fn to_fixed_6(txt: &str) -> Result<u64> {
     }
 
     let mut parts = txt.split('.');
-    let whole = parts.next().ok_or_else(|| anyhow!("missing integer part"))?;
+    let whole = parts
+        .next()
+        .ok_or_else(|| anyhow!("missing integer part"))?;
     let frac = parts.next();
     if parts.next().is_some() {
         return Err(anyhow!("invalid decimal format"));
@@ -405,6 +449,29 @@ mod tests {
     }
 
     #[test]
+    fn parse_token_created_reads_anchor_program_data_event() {
+        let logs = RpcLogsResponse {
+            signature: "3VkKw1wWr3x5T9oFaMokPAh9t3xnwHpGy8vkKYunx3PCxQYZ6j8M7YFysBTcmaXTo1xmqDndxQQozSGbSivuALyc".to_string(),
+            err: None,
+            logs: vec![
+                "Program log: Instruction: MintToken".to_string(),
+                "Program data: 7BMp/4JOk6wJ6MPdcdLYrj9PysqP87zmMe3w4cqWUjYR7m6SAMZxhQdZeBtWYGm+K4Y//TgZnDCL0//kPtEniI2kbgPg6AL9BkBCDwAAAAAAash7AgAAAAAADicHAAAAAOs5whoAAAAA".to_string(),
+            ],
+        };
+
+        let parsed = parse_token_created(&logs, Pubkey::new_unique()).expect("event should parse");
+        assert_eq!(
+            parsed.creator,
+            "fgXcu1vpWN27oS2rZjsQvVKBtog2xwjroN7Dr5vofbz"
+        );
+        assert_eq!(parsed.decimals, 6);
+        assert_eq!(parsed.initial_supply, 1_000_000);
+        assert_eq!(parsed.fee_lamports, 41_666_666);
+        assert_eq!(parsed.sol_usd_price, 120_000_000);
+        assert_eq!(parsed.signature, logs.signature);
+    }
+
+    #[test]
     fn price_source_prefers_mock_over_url() {
         let cfg = sample_cfg(Some(123), Some("https://example.com/price"));
         let source = PriceSource::from_config(&cfg);
@@ -421,7 +488,10 @@ mod tests {
         match source {
             PriceSource::Mock(_) => panic!("expected http source"),
             PriceSource::Http { url } => {
-                assert_eq!(url, "https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT")
+                assert_eq!(
+                    url,
+                    "https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT"
+                )
             }
         }
     }

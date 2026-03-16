@@ -5,13 +5,13 @@ package_manager = "yarn"
 resolution = true
 skip-lint = false
 
-[programs.localnet]
-sol_usd_oracle = "4cuvLFFqhaKnTHfeq2FtTUvgudRSe7wq982fA9PBUqBU"
-token_minter = "E5erGzaxgCwHqH7RjLXLGWziXj8CXpyN7zW6BRodfFnE"
-
 [programs.devnet]
-sol_usd_oracle = "4cuvLFFqhaKnTHfeq2FtTUvgudRSe7wq982fA9PBUqBU"
-token_minter = "E5erGzaxgCwHqH7RjLXLGWziXj8CXpyN7zW6BRodfFnE"
+sol_usd_oracle = "A2SrqZUseNK5VN3ZTEkKoWWzsyYzidCobkLfZCJ397QN"
+token_minter = "7mpVgKnX25rU1Y4Sx7UN3zAK3cXv392rYNJ8X755Q2sn"
+
+[programs.localnet]
+sol_usd_oracle = "A2SrqZUseNK5VN3ZTEkKoWWzsyYzidCobkLfZCJ397QN"
+token_minter = "7mpVgKnX25rU1Y4Sx7UN3zAK3cXv392rYNJ8X755Q2sn"
 
 [registry]
 url = "https://api.apr.dev"

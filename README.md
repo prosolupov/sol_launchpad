@@ -68,6 +68,18 @@
    ```
    Или `yarn litesvm` для запуска только тестов в `tests/*.litesvm.ts`.
 
+## Актуальный Devnet
+
+- `sol_usd_oracle`: `A2SrqZUseNK5VN3ZTEkKoWWzsyYzidCobkLfZCJ397QN`
+- `token_minter`: `7mpVgKnX25rU1Y4Sx7UN3zAK3cXv392rYNJ8X755Q2sn`
+- `ORACLE_STATE_PUBKEY`: `3FsBAwcBHBED2AFkpbDLZti1T2mdoqtj1aWhSgoEKYhJ`
+
+Успешные транзакции создания токенов в devnet:
+
+- https://explorer.solana.com/tx/49RCdPoiQ8bpMPwRJ2K1NcewpLi681o1yAWJSAxq6uVCv4vKgoPAKz4P5TsdC1ktS2bWMtRuqP7pRBLVwM8cw3Mx?cluster=devnet
+- https://explorer.solana.com/tx/3VkKw1wWr3x5T9oFaMokPAh9t3xnwHpGy8vkKYunx3PCxQYZ6j8M7YFysBTcmaXTo1xmqDndxQQozSGbSivuALyc?cluster=devnet
+- https://explorer.solana.com/tx/4B2H31Dk4Fz4hLuH4Eb3m6uJs1NJaMpLLd8BS4SXUsi2HJG9xeSSM5JHjLFRmwYpEV85ifXkYktKd86T4Ny2Aeae?cluster=devnet
+
 ## Переменные окружения для backend
 
 См. `backend/.env.example`. Основные:
